@@ -1,0 +1,426 @@
+// ==UserScript==
+// @name         Edgenuity Toolkit
+// @namespace
+// @version      0.9
+// @description  Makes edgenuity better.
+// @author       Ryan
+// @match        https://r10.core.learn.edgenuity.com/Player/
+// @grant        all
+// ==/UserScript==
+
+//---------------| Settings |--------------------
+var autofillVocab          = false; //Fill the vocabulary for you.
+var autoContinue           = false; //Automatically move to the next slide or section.
+var continueOnComplete     = false; //Continue when the currently playing video finishes rather than when available.
+var clickWhileTalking      = false; //Enables the ability to click while the speaker is talking
+var autoAnswer             = false; //Automatically hits submit button for assignments to get to the answer faster.
+var showInvisible          = false; //Set all objects visible.
+var settingsMenuVisible    = true;  //Show the floating settings menu in edgenuity.
+//=================DELAYS========================
+var vocabDelay             = 700;
+var autoContinueDelay      = 1000;
+var clickWhileTalkingDelay = 700;
+var randomAnswersDelay     = 1000;
+var showInvisibleDelay     = 1000;
+var continueOnCompleteDelay= 1000;
+//================Button Colours=================
+var clrDisabled            = "black";
+var clrEnabled             = "orange";
+var clrHover               = "purple";
+//-----------------------------------------------
+
+var vocabTimer, continueTimer, cwtTimer, randomAnswersTimer,
+    showInvisibleTimer, continueOnCompleteTimer;
+
+var divSettings, divContainer;
+
+var btnHide, btnToggleVocab, btnToggleContinue, btnToggleCWT,
+    btnAutoAnswer, btnShowInvis, btnTranscript, btnContinueOnComplete;
+
+var divSettingsHidden = false;
+
+
+function createSettingsMenu() {
+    console.log("Creating settings");
+    divSettings           = document.createElement("div");
+    divContainer          = document.createElement("div");
+    btnToggleVocab        = document.createElement("button");
+    btnToggleContinue     = document.createElement("button");
+    btnToggleCWT          = document.createElement("button");
+    btnAutoAnswer         = document.createElement("button");
+    btnShowInvisible      = document.createElement("button");
+    btnTranscript         = document.createElement("button");
+    btnContinueOnComplete = document.createElement("button");
+    btnHide               = document.createElement("button");
+
+    var updateButtons = function() {
+        btnHide.style.backgroundColor           = divSettingsHidden ? clrEnabled : clrDisabled;
+        btnHide.style.color                     = "white";
+        btnHide.style.width                     = "100%";
+        divSettings.style.opacity               = divSettingsHidden ? "0.03"   : "0.7";
+        btnHide.innerHTML                       = divSettingsHidden ? "[+]"  : "[-]";
+        btnToggleVocab.style.backgroundColor    = autofillVocab     ? clrEnabled : clrDisabled;
+        btnToggleVocab.innerHTML                = "AutoVocab";
+        btnToggleContinue.style.backgroundColor = autoContinue      ? clrEnabled : clrDisabled;
+        btnToggleContinue.innerHTML             = "AutoContinue";
+        btnToggleCWT.style.backgroundColor      = clickWhileTalking ? clrEnabled : clrDisabled;
+        btnToggleCWT.innerHTML                  = "Enable clicking";
+        btnAutoAnswer.style.backgroundColor     = autoAnswer ? clrEnabled : clrDisabled;
+        btnAutoAnswer.innerHTML                 = "Auto Answer";
+        btnShowInvisible.style.backgroundColor  = showInvisible ? clrEnabled : clrDisabled;
+        btnShowInvisible.innerHTML              = "Show invisible";
+        btnTranscript.style.backgroundColor     = clrDisabled;
+        btnTranscript.innerHTML                 = "Parse Transcript";
+        btnContinueOnComplete.style.backgroundColor = continueOnComplete ? clrEnabled : clrDisabled;
+        btnContinueOnComplete.innerHTML         = "next when ready";
+    };
+    updateButtons();
+    divSettings.style.backgroundColor       = "white";
+    divSettings.style.width                 = "120px";
+    divSettings.style.height                = "auto";
+    divSettings.style.zIndex                = "100";
+    divSettings.style.position              = "absolute";
+    divSettings.style.top                   = "50px";
+    divSettings.style.left                  = "50%";
+    divSettings.style.paddingTop             = "15px";
+    $(divSettings).draggable();
+
+    btnHide.addEventListener("click", function() {
+        if ( divSettingsHidden ) {
+            divContainer.style.display = "block";
+            divSettingsHidden = false;
+        } else {
+            divContainer.style.display = "none";
+            divSettingsHidden = true;
+        }
+        updateButtons();
+    });
+    btnToggleVocab.addEventListener("click", function() {
+        if ( autofillVocab ) {
+            autofillVocab = false;
+            clearInterval(vocabTimer);
+        } else {
+            autofillVocab = true;
+            clearInterval(vocabTimer);
+            vocabLoop();
+        }
+        updateButtons();
+    });
+    btnToggleContinue.addEventListener("click", function() {
+        if ( autoContinue ) {
+            autoContinue = false;
+            clearInterval(continueTimer);
+        } else {
+            autoContinue = true;
+            continueTimer = setInterval(goNext, autoContinueDelay);
+        }
+        updateButtons();
+    });
+    btnContinueOnComplete.addEventListener("click", function() {
+       if ( continueOnComplete ) {
+           continueOnComplete = false;
+           clearInterval(continueOnCompleteTimer);
+       } else {
+           continueOnComplete = true;
+           continueOnCompleteTimer = setInterval(continueWhenReady, continueOnCompleteDelay);
+       }
+    });
+    btnToggleCWT.addEventListener("click", function() {
+        if ( clickWhileTalking ) {
+            clearInterval(cwtTimer);
+            clickWhileTalking = false;
+        } else {
+            clickWhileTalking = true;
+            cwtTimer = setInterval(enableClicking, clickWhileTalkingDelay);
+        }
+        updateButtons();
+    });
+    btnAutoAnswer.addEventListener("click", function() {
+        if ( autoAnswer ) {
+            autoAnswer = false;
+            clearInterval(randomAnswersTimer);
+        } else {
+            autoAnswer = true;
+            randomAnswersTimer = setInterval(setAnswers, randomAnswersDelay);
+        }
+        updateButtons();
+    });
+    btnShowInvisible.addEventListener("click", function() {
+        if ( showInvisible ) {
+            showInvisible = false;
+            clearInterval(showInvisibleTimer);
+            hideInvisibleItems();
+        } else {
+            showInvisible = true;
+            showInvisibleTimer = setInterval(showInvisibleItems, showInvisibleDelay);
+        }
+        updateButtons();
+    });
+    btnTranscript.addEventListener("click", function() {
+        var textContent = parseTranscript();
+        if ( textContent !== "" ) {
+            var div = $(document.createElement('div'))
+            .css("max-width", "700px")
+            .css("height", "auto")
+            .css("position", "absolute")
+            .css("top",  $(divSettings).position().top+100+"px")
+            .css("left", $(divSettings).position().left+100+"px")
+            .css("z-index", "1000")
+            .css("background-color", "black")
+            .css("padding", "20px")
+            .append(
+                $(document.createElement('button'))
+                .html("close")
+                .on("click", function() {
+                    div.remove();
+                })
+            )
+            .draggable();
+            var textArea = $(document.createElement("textarea"))
+            .css("height", "200px")
+            .css("width", "100%")
+            .css("resize", "both")
+            .val(textContent)
+            .on("click", function() {
+                $(this).select();
+            });
+            div.append(textArea);
+            $(document.body).append(div);
+        }
+    });
+    divContainer.appendChild(btnToggleVocab);
+    divContainer.appendChild(btnToggleContinue);
+    divContainer.appendChild(btnContinueOnComplete);
+    divContainer.appendChild(btnToggleCWT);
+    divContainer.appendChild(btnAutoAnswer);
+    divContainer.appendChild(btnShowInvisible);
+    divContainer.appendChild(btnTranscript);
+    //Transitioned to using jquery here
+    $(divContainer).append(
+        $(document.createElement('button')).
+        html("Paint it black")
+        .css("background-color", clrDisabled)
+        .on("click", function() {
+            $("*").not($(divSettings))
+                .css("background-color", "black")
+                .css("color", "white");
+        })
+    );
+    $(divContainer).append(
+        $(document.createElement('button')).
+        html("Notepad")
+        .css("background-color", clrDisabled)
+        .on("click", function() {
+            var div = $(document.createElement('div'))
+            .css("width", "auto")
+            .css("height", "auto")
+            .css("position", "absolute")
+            .css("top",  $(divSettings).position().top+100+"px")
+            .css("left", $(divSettings).position().left+100+"px")
+            .css("z-index", "1000")
+            .css("background-color", "black")
+            .css("padding", "20px")
+            .append(
+                $(document.createElement('button'))
+                .html("close")
+                .css("display", "block")
+                .on("click", function() {
+                    div.remove();
+                })
+            )
+            .draggable();
+            var textArea = $(document.createElement("textarea"))
+            .css("min-height", "30px")
+            .css("resize", "both")
+            .css("display", "block");
+            div.append(textArea);
+            $(document.body).append(div);
+        })
+    );
+
+    for ( var i=0; i < divContainer.childNodes.length; i++) {
+        var n = divContainer.childNodes[i];
+        n.style.width        = "100%";
+        n.style.fontSize     = "13px";
+        n.style.border       = "none";
+        n.style.borderRadius = "1px";
+        n.style.color        = "white";
+        $(n).hover(function() {
+            $(this).css("background-color", clrHover)
+                .css("color", "white");
+        }, function() {
+            $(this).css("background-color", clrDisabled);
+            updateButtons();
+        });
+    }
+    divSettings.appendChild(btnHide);
+    divSettings.appendChild(divContainer);
+    document.body.appendChild(divSettings);
+}
+
+function vocabLoop() {
+    try {
+        vocabTimer = setInterval(scanVocab, vocabDelay);
+    } catch (err) {
+        console.log(err);
+    }
+}
+
+function scanVocab() {
+    var stage = document.getElementById("stageFrame");
+    var frame;
+    if ( stage ) {
+        frame = stage.contentWindow.document;
+    } else {
+        return;
+    }
+    var vocabButton = stage.contentWindow.document.getElementsByClassName("plainbtn alt selected")[0];
+    if ( vocabButton ) {
+        var vocabInput = frame.getElementsByClassName("word-textbox word-normal")[0];
+        if ( vocabInput ) {
+            vocabInput.value = vocabButton.innerHTML;
+            var playbutton = frame.getElementsByClassName("playbutton vocab-play")[0];
+            if ( playbutton ) {
+                playbutton.click();
+            }
+            var nextButton = frame.getElementsByClassName("uibtn-arrow-next")[0];
+            if ( nextButton ) {
+                nextButton.click();
+            }
+        }
+    }
+}
+
+
+function continueWhenReady() {
+    var frame = document.getElementById("stageFrame");
+    if ( frame ) {
+        frame = frame.contentWindow.document;
+        var currentTime = document.getElementsByClassName("uid1_time")[0];
+        if ( currentTime ) {
+            currentTime = currentTime.innerHTML.split(" / ");
+            if ((currentTime[0] && currentTime[1]) && currentTime[0] == currentTime[1]) {
+                goNext();
+            }
+        }
+    }
+}
+
+
+function goNext() {
+    var footnavRight = document.getElementsByClassName("footnav goRight")[0];
+    if ( footnavRight ) {
+        footnavRight.click();
+    }
+    var frame = document.getElementById("stageFrame");
+    if ( frame ) {
+        frame = frame.contentWindow.document;
+        var goRight = frame.getElementsByClassName("FrameRight")[0];
+        if ( goRight ) {
+            var b = goRight.firstChild;
+            if ( b ) {
+                b.click();
+            }
+        }
+    }
+}
+
+function enableClicking() {
+    var frame = document.getElementById("stageFrame");
+    if ( frame ) {
+        var invisodiv = frame.contentWindow.document.getElementById("invis-o-div");
+        if ( invisodiv ) {
+            //invisodiv.style.backgroundColor  = "#00ff00";
+            //invisodiv.style.opacity          = "0.3";
+            //invisodiv.style.pointerEvents    = "none";
+            invisodiv.parentNode.removeChild(invisodiv);
+        }
+        var submitBlocker = frame.contentWindow.document.getElementById("submitBlocker");
+        if ( submitBlocker ) {
+            submitBlocker.parentNode.removeChild(submitBlocker);
+        }
+        var submitLoading = frame.contentWindow.document.getElementById("submitLoading");
+        if ( submitLoading ) {
+            submitLoading.parentNode.removeChild(submitLoading);
+        }
+    }
+}
+
+function setAnswers() {
+    var frame = document.getElementById("stageFrame");
+    if ( frame ) {
+        frame = frame.contentWindow.document;
+        var preview = frame.getElementById("iFramePreview");
+        if ( preview ) {
+            preview = preview.contentWindow.document;
+            var buttons = preview.getElementsByClassName("answer-choice-button");
+            for( var i=0; i < buttons.length; i++ ) {
+                buttons[i].checked = true;
+            }
+            var submit = frame.getElementById("btnCheck");
+            if ( submit ) {
+                submit.click();
+                console.log(submit);
+            }
+        }
+    }
+}
+
+function showInvisibleItems() {
+    var frame = document.getElementById("stageFrame");
+    if ( frame ) {
+        frame = frame.contentWindow.document;
+        $(frame.body).find("*:hidden").not(".uibtn")
+            .show()
+            .addClass("sethidden");
+    }
+}
+
+function hideInvisibleItems() {
+    var frame = document.getElementById("stageFrame");
+    if ( frame ) {
+        frame = frame.contentWindow.document;
+        $(frame.body).find(".sethidden").hide();
+    }
+}
+
+function parseTranscript() {
+    var transcripts = document.getElementsByClassName("transcript-text");
+    var total = "";
+    for ( var i=0; i < transcripts.length; i++ ) {
+        total += transcripts[i].innerHTML.trim()
+            .replace(/( )+/g, " ")
+            .replace("TEACHER: ", "\n\nTEACHER:\n") +
+            " ";
+    }
+    return total;
+}
+
+
+(function() {
+    'use strict';
+    //Generate Settings Menu
+    if ( settingsMenuVisible ) {
+        createSettingsMenu();
+    }
+    //VOCAB
+    if ( autofillVocab ) {
+        vocabLoop();
+    }
+    //autocontinue
+    if ( autoContinue ) {
+        continueTimer = setInterval(goNext, autoContinueDelay);
+    }
+    //click while talking
+    if ( clickWhileTalking ) {
+        cwtTimer = setInterval(enableClicking, clickWhileTalkingDelay);
+    }
+    //autoAnswer
+    if ( autoAnswer ) {
+        randomAnswersTimer = setInterval(setAnswers, randomAnswersDelay);
+    }
+    //show Invisible
+    if ( showInvisible ) {
+        showInvisibleTimer = setInterval(showInvisibleItems, showInvisibleDelay);
+    }
+})();
